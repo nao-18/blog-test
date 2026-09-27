@@ -1,0 +1,3 @@
+<?php
+// Outside the document root. Base64 safely carries arbitrary password characters.
+return json_decode(base64_decode('{{ {"host": todo_db_host, "port": todo_db_port, "database": "todo", "user": "todo_app", "password": todo_db_password} | to_json | b64encode }}'), true, 512, JSON_THROW_ON_ERROR);

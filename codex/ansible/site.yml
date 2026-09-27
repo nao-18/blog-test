@@ -1,0 +1,25 @@
+---
+- name: Prepare every middleware virtual machine
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - common
+
+- name: Deploy application middleware
+  hosts: app
+  become: true
+  roles:
+    - app_stack
+
+- name: Deploy database middleware
+  hosts: db
+  become: true
+  roles:
+    - db_stack
+
+- name: Deploy monitoring middleware
+  hosts: monitor
+  become: true
+  roles:
+    - monitor_stack

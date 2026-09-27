@@ -1,0 +1,112 @@
+---
+- name: Install Nginx and PHP-FPM on the VM
+  ansible.builtin.package:
+    name: [nginx, php-fpm]
+    state: present
+
+- name: Collect installed package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Detect Debian PHP-FPM service and configuration path
+  ansible.builtin.set_fact:
+    php_fpm_service: "{{ ansible_facts.packages.keys() | select('match', '^php[0-9.]+-fpm$') | first }}"
+    php_fpm_version: "{{ (ansible_facts.packages.keys() | select('match', '^php[0-9.]+-fpm$') | first) | regex_replace('^php([0-9.]+)-fpm$', '\\1') }}"
+    php_fpm_config_path: "/etc/php/{{ (ansible_facts.packages.keys() | select('match', '^php[0-9.]+-fpm$') | first) | regex_replace('^php([0-9.]+)-fpm$', '\\1') }}/fpm/pool.d/zz-observability.conf"
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Set Red Hat PHP-FPM service and configuration path
+  ansible.builtin.set_fact:
+    php_fpm_service: php-fpm
+    php_fpm_version: redhat
+    php_fpm_config_path: /etc/php-fpm.d/zz-observability.conf
+  when: ansible_facts.os_family == 'RedHat'
+
+- name: Create application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /var/www/middleware
+    - /etc/alloy
+    - /etc/otelcol-contrib
+    - "/opt/nginx-exporter-{{ nginx_exporter_version }}"
+    - "/opt/php-fpm-exporter-{{ php_fpm_exporter_version }}"
+
+- name: Install application configuration
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - { src: nginx.conf.j2, dest: /etc/nginx/conf.d/middleware.conf }
+    - { src: php-fpm.conf.j2, dest: "{{ php_fpm_config_path }}" }
+    - { src: index.php.j2, dest: /var/www/middleware/index.php }
+    - { src: alloy.config.j2, dest: /etc/alloy/config.alloy }
+    - { src: otel.yaml.j2, dest: /etc/otelcol-contrib/config.yaml }
+  notify: Restart application services
+
+- name: Disable Debian default Nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  when: ansible_facts.os_family == 'Debian'
+  notify: Restart application services
+
+- name: Allow Nginx to connect to PHP-FPM when SELinux is enforcing
+  ansible.builtin.command: setsebool -P httpd_can_network_connect 1
+  changed_when: false
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled'
+    - (ansible_facts.selinux | default({})).mode | default('permissive') == 'enforcing'
+
+- name: Download application exporters
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - { url: "https://github.com/nginx/nginx-prometheus-exporter/releases/download/v{{ nginx_exporter_version }}/nginx-prometheus-exporter_{{ nginx_exporter_version }}_linux_{{ binary_arch }}.tar.gz", dest: "/tmp/nginx-exporter-{{ nginx_exporter_version }}.tar.gz" }
+    - { url: "https://github.com/hipages/php-fpm_exporter/releases/download/v{{ php_fpm_exporter_version }}/php-fpm_exporter_{{ php_fpm_exporter_version }}_linux_{{ binary_arch }}.tar.gz", dest: "/tmp/php-fpm-exporter-{{ php_fpm_exporter_version }}.tar.gz" }
+
+- name: Extract application exporters
+  ansible.builtin.unarchive:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    remote_src: true
+    creates: "{{ item.creates }}"
+  loop:
+    - { src: "/tmp/nginx-exporter-{{ nginx_exporter_version }}.tar.gz", dest: "/opt/nginx-exporter-{{ nginx_exporter_version }}", creates: "/opt/nginx-exporter-{{ nginx_exporter_version }}/nginx-prometheus-exporter" }
+    - { src: "/tmp/php-fpm-exporter-{{ php_fpm_exporter_version }}.tar.gz", dest: "/opt/php-fpm-exporter-{{ php_fpm_exporter_version }}", creates: "/opt/php-fpm-exporter-{{ php_fpm_exporter_version }}/php-fpm_exporter" }
+  notify: Restart application services
+
+- name: Install application exporter binaries
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    remote_src: true
+    mode: "0755"
+  loop:
+    - { src: "/opt/nginx-exporter-{{ nginx_exporter_version }}/nginx-prometheus-exporter", dest: /usr/local/bin/nginx-prometheus-exporter }
+    - { src: "/opt/php-fpm-exporter-{{ php_fpm_exporter_version }}/php-fpm_exporter", dest: /usr/local/bin/php-fpm_exporter }
+  notify: Restart application services
+
+- name: Install exporter services
+  ansible.builtin.template:
+    src: "{{ item }}.service.j2"
+    dest: "/etc/systemd/system/{{ item }}.service"
+    mode: "0644"
+  loop: [nginx-exporter, php-fpm-exporter]
+  notify: Restart application services
+
+- name: Enable application services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop: ["{{ php_fpm_service }}", nginx, nginx-exporter, php-fpm-exporter, alloy, otelcol-contrib]

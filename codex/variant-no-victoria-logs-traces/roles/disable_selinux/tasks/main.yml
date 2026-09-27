@@ -1,0 +1,33 @@
+---
+- name: Disable SELinux on Red Hat-family VMs
+  when: ansible_facts.os_family == 'RedHat'
+  become: true
+  block:
+    - name: Install SELinux management dependencies
+      ansible.builtin.dnf:
+        name:
+          - python3-libselinux
+          - grubby
+        state: present
+
+    - name: Disable SELinux in configuration and kernel boot parameters
+      ansible.posix.selinux:
+        state: disabled
+        update_kernel_param: true
+      register: disable_selinux_result
+
+    - name: Reboot to apply SELinux disablement
+      ansible.builtin.reboot:
+        msg: Rebooting to disable SELinux
+      when:
+        - disable_selinux_result.reboot_required | default(false)
+        - disable_selinux_reboot | bool
+
+    - name: Report pending reboot for SELinux disablement
+      ansible.builtin.debug:
+        msg: >-
+          SELinux disablement requires a reboot. Reboot the VM manually or
+          rerun with -e disable_selinux_reboot=true to complete the change.
+      when:
+        - disable_selinux_result.reboot_required | default(false)
+        - not (disable_selinux_reboot | bool)

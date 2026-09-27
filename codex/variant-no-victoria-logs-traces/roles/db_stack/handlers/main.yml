@@ -1,0 +1,7 @@
+---
+- name: Restart database services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop: ["{{ mysql_service }}", mysql-exporter, alloy, otelcol-contrib]

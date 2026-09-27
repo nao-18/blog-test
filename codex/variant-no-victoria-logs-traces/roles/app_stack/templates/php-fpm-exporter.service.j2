@@ -1,0 +1,16 @@
+[Unit]
+Description=PHP-FPM Prometheus Exporter
+After=network-online.target {{ php_fpm_service }}.service
+Requires={{ php_fpm_service }}.service
+
+[Service]
+User=nobody
+Group={{ 'nogroup' if ansible_facts.os_family == 'Debian' else 'nobody' }}
+Environment=PHP_FPM_SCRAPE_URI=tcp://127.0.0.1:9000/status
+Environment=PHP_FPM_FIX_PROCESS_COUNT=true
+ExecStart=/usr/local/bin/php-fpm_exporter server --web.listen-address={{ admin_bind_address }}:9253
+Restart=on-failure
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

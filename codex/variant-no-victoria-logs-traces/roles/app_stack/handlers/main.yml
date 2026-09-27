@@ -1,0 +1,8 @@
+---
+- name: Restart application services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop: ["{{ php_fpm_service }}", nginx, nginx-exporter, php-fpm-exporter, alloy, otelcol-contrib]
+

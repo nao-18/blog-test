@@ -1,0 +1,104 @@
+---
+- name: Reject placeholder database credentials
+  ansible.builtin.assert:
+    that: mysql_exporter_password != 'CHANGE_ME'
+    fail_msg: Set and vault mysql_exporter_password in group_vars.
+
+- name: Install the distribution MySQL server on the VM
+  ansible.builtin.package:
+    # Rocky Linux 10 renamed the AppStream package to mysql8.4-server.
+    name: "{{ 'default-mysql-server' if ansible_facts.os_family == 'Debian' else 'mysql8.4-server' }}"
+    state: present
+
+- name: Set platform-specific MySQL service and configuration path
+  ansible.builtin.set_fact:
+    mysql_service: "{{ 'mysql' if ansible_facts.os_family == 'Debian' else 'mysqld' }}"
+    mysql_config_path: "{{ '/etc/mysql/conf.d/99-middleware.cnf' if ansible_facts.os_family == 'Debian' else '/etc/my.cnf.d/99-middleware.cnf' }}"
+
+- name: Create database configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /etc/alloy
+    - /etc/otelcol-contrib
+    - /etc/mysqld-exporter
+    - "/opt/mysqld-exporter-{{ mysql_exporter_version }}"
+
+- name: Configure MySQL network binding
+  ansible.builtin.template:
+    src: mysql.cnf.j2
+    dest: "{{ mysql_config_path }}"
+    mode: "0644"
+  notify: Restart database services
+
+- name: Start MySQL before provisioning the exporter account
+  ansible.builtin.service:
+    name: "{{ mysql_service }}"
+    enabled: true
+    state: started
+
+- name: Provision the MySQL exporter account through the local admin socket
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - --execute
+      - >-
+        CREATE USER IF NOT EXISTS 'exporter'@'127.0.0.1' IDENTIFIED BY '{{ mysql_exporter_password | replace("'", "''") }}';
+        ALTER USER 'exporter'@'127.0.0.1' IDENTIFIED BY '{{ mysql_exporter_password | replace("'", "''") }}';
+        GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'exporter'@'127.0.0.1';
+        FLUSH PRIVILEGES;
+  changed_when: false
+  no_log: true
+
+- name: Install database configuration
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop:
+    - { src: exporter.cnf.j2, dest: /etc/mysqld-exporter/.my.cnf, group: "{{ 'nogroup' if ansible_facts.os_family == 'Debian' else 'nobody' }}", mode: '0640' }
+    - { src: alloy.config.j2, dest: /etc/alloy/config.alloy }
+    - { src: otel.yaml.j2, dest: /etc/otelcol-contrib/config.yaml }
+  no_log: "{{ item.src == 'exporter.cnf.j2' }}"
+  notify: Restart database services
+
+- name: Download MySQL exporter
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/mysqld_exporter/releases/download/v{{ mysql_exporter_version }}/mysqld_exporter-{{ mysql_exporter_version }}.linux-{{ binary_arch }}.tar.gz"
+    dest: "/tmp/mysqld-exporter-{{ mysql_exporter_version }}.tar.gz"
+    mode: "0644"
+
+- name: Extract MySQL exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/mysqld-exporter-{{ mysql_exporter_version }}.tar.gz"
+    dest: /opt
+    remote_src: true
+    creates: "/opt/mysqld_exporter-{{ mysql_exporter_version }}.linux-{{ binary_arch }}/mysqld_exporter"
+
+- name: Install MySQL exporter binary
+  ansible.builtin.copy:
+    src: "/opt/mysqld_exporter-{{ mysql_exporter_version }}.linux-{{ binary_arch }}/mysqld_exporter"
+    dest: /usr/local/bin/mysqld_exporter
+    remote_src: true
+    mode: "0755"
+  notify: Restart database services
+
+- name: Install MySQL exporter service
+  ansible.builtin.template:
+    src: mysql-exporter.service.j2
+    dest: /etc/systemd/system/mysql-exporter.service
+    mode: "0644"
+  notify: Restart database services
+
+- name: Enable database services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop: ["{{ mysql_service }}", mysql-exporter, alloy, otelcol-contrib]

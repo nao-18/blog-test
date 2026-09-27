@@ -1,0 +1,5 @@
+[client]
+user=exporter
+password="{{ mysql_exporter_password | replace('\\', '\\\\') | replace('"', '\\"') }}"
+host=127.0.0.1
+port=3306

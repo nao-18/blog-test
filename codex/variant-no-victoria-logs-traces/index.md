@@ -1,0 +1,22 @@
+下記サーバにmidlewareを追加するansibleを作成しなさい
+- app
+  - nginx
+  - nginx exporter
+  - php-fpm
+  - php-fpm exporter
+  - node exporter
+  - grafana alloy
+  - opentelemetry collector
+- db
+  - mysql
+  - mysql exporter
+  - node exporter
+  - grafana alloy
+  - opentelemetry collector
+- monitor
+  - victoriametrics
+  - victoriametrics mcp server
+  - node exporter
+  - grafana alloy
+  - opentelemetry collector
+  - grafana

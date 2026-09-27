@@ -1,0 +1,11 @@
+project_id = "grasys-study"
+
+# Optional overrides:
+# region       = "asia-northeast1"
+# zone         = "asia-northeast1-a"
+# name_prefix  = "dialog"
+# function_image_tag = "v1"
+#
+# allowed_ssh_ranges = ["203.0.113.10/32"]
+
+name_prefix = "arai"

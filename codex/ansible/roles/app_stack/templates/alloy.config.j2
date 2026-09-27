@@ -1,0 +1,31 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+prometheus.scrape "app" {
+  targets = [
+    { "__address__" = "127.0.0.1:9113", "job" = "nginx", "instance" = "{{ inventory_hostname }}" },
+    { "__address__" = "127.0.0.1:9253", "job" = "php-fpm", "instance" = "{{ inventory_hostname }}" },
+    { "__address__" = "127.0.0.1:9100", "job" = "node", "instance" = "{{ inventory_hostname }}" },
+    { "__address__" = "127.0.0.1:8888", "job" = "otel-collector", "instance" = "{{ inventory_hostname }}" },
+  ]
+  forward_to = [prometheus.remote_write.victoriametrics.receiver]
+}
+
+prometheus.remote_write "victoriametrics" {
+  endpoint {
+    url = "{{ victoriametrics_url }}/api/v1/write"
+  }
+}
+
+loki.source.journal "local" {
+  forward_to = [loki.write.victorialogs.receiver]
+  labels     = { instance = "{{ inventory_hostname }}" }
+}
+
+loki.write "victorialogs" {
+  endpoint {
+    url = "{{ victorialogs_url }}/insert/loki/api/v1/push"
+  }
+}

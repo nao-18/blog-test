@@ -1,0 +1,36 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: {{ service_bind_address }}:4317
+      http:
+        endpoint: {{ service_bind_address }}:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+  batch: {}
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: production
+        action: upsert
+      - key: host.name
+        value: "{{ inventory_hostname }}"
+        action: upsert
+
+exporters:
+  otlphttp/victoria:
+    compression: gzip
+    metrics_endpoint: "{{ victoriametrics_url }}/opentelemetry/v1/metrics"
+
+service:
+  telemetry:
+    metrics:
+      address: {{ admin_bind_address }}:8888
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/victoria]

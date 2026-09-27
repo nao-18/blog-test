@@ -1,0 +1,31 @@
+---
+# Trial-only credentials. Replace and vault these values before production use.
+mysql_exporter_password: testpass
+grafana_admin_password: admin
+
+# Restrict management endpoints by default. Use a trusted private interface
+# instead of 0.0.0.0 when remote management access is required.
+service_bind_address: 0.0.0.0
+admin_bind_address: 127.0.0.1
+
+# Address reachable from the app/db virtual machines.
+monitor_address: "{{ hostvars[groups['monitor'][0]].ansible_host | default(groups['monitor'][0]) }}"
+victoriametrics_url: "http://{{ monitor_address }}:8428"
+
+# Native package/binary versions. Upgrade these deliberately and test first.
+node_exporter_version: 1.9.1
+otel_collector_version: 0.135.0
+nginx_exporter_version: 1.5.1
+php_fpm_exporter_version: 2.2.0
+mysql_exporter_version: 0.17.2
+victoriametrics_version: 1.150.0
+mcp_victoriametrics_version: 1.18.0
+
+binary_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
+mcp_arch: "{{ {'x86_64': 'x86_64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
+
+# Todo database connection; store todo_db_password in Ansible Vault.
+todo_db_host: "{{ hostvars[groups['db'][0]].ansible_host | default(groups['db'][0]) }}"
+todo_db_port: 3306
+# Restrict this to the app VM's source IP when possible.
+todo_db_allowed_host: "%"
