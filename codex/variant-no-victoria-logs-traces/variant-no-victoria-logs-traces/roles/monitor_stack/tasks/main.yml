@@ -30,8 +30,6 @@
     - { path: /etc/alloy }
     - { path: /etc/otelcol-contrib }
     - { path: /etc/grafana/provisioning/datasources }
-    - { path: /etc/grafana/provisioning/dashboards }
-    - { path: /var/lib/grafana/dashboards, owner: grafana }
     - { path: "/opt/victoriametrics-{{ victoriametrics_version }}" }
     - { path: "/opt/mcp-victoriametrics-{{ mcp_victoriametrics_version }}" }
 
@@ -98,24 +96,6 @@
     - { src: otel.yaml.j2, dest: /etc/otelcol-contrib/config.yaml }
   no_log: "{{ item.src == 'grafana.ini.j2' }}"
   notify: Restart monitoring services
-
-- name: Provision Grafana dashboard provider
-  ansible.builtin.copy:
-    src: dashboards.yaml
-    dest: /etc/grafana/provisioning/dashboards/middleware.yaml
-    owner: root
-    group: grafana
-    mode: "0644"
-  notify: Restart Grafana
-
-- name: Install Grafana dashboards
-  ansible.builtin.copy:
-    src: "dashboards/{{ item }}.json"
-    dest: "/var/lib/grafana/dashboards/{{ item }}.json"
-    owner: root
-    group: grafana
-    mode: "0644"
-  loop: [nginx, mysql, node-exporter]
 
 - name: Enable monitoring services
   ansible.builtin.systemd_service:

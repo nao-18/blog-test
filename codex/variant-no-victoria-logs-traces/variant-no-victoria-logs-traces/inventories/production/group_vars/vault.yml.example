@@ -1,3 +1,4 @@
 ---
 mysql_exporter_password: replace-with-a-different-long-random-value
 grafana_admin_password: replace-with-a-long-random-value
+todo_db_password: replace-with-a-unique-long-random-value

@@ -1,7 +1,7 @@
 server {
     listen {{ service_bind_address }}:80;
     server_name _;
-    root /var/www/html;
+    root /var/www/middleware;
     index index.php;
 
     location = /stub_status {

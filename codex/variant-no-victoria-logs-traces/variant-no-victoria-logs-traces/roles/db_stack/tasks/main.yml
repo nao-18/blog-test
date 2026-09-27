@@ -53,6 +53,38 @@
   changed_when: false
   no_log: true
 
+- name: Validate Todo database settings
+  ansible.builtin.assert:
+    that:
+      - todo_db_password is defined
+      - todo_db_password | default('') | length >= 16
+      - todo_db_allowed_host is match('^[a-zA-Z0-9_.:%/-]+$')
+    fail_msg: Set todo_db_password in Vault and a valid todo_db_allowed_host.
+  no_log: true
+
+- name: Install Todo schema
+  ansible.builtin.copy:
+    src: todo.sql
+    dest: /etc/mysql-todo.sql
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Create Todo database and table without deleting existing tasks
+  ansible.builtin.shell: mysql --protocol=socket < /etc/mysql-todo.sql
+  changed_when: false
+
+- name: Provision Todo account with CRUD permissions
+  ansible.builtin.command:
+    argv: [mysql, --protocol=socket]
+    stdin: |
+      SET SESSION sql_mode = 'NO_BACKSLASH_ESCAPES';
+      CREATE USER IF NOT EXISTS 'todo_app'@'{{ todo_db_allowed_host }}' IDENTIFIED BY '{{ todo_db_password | replace("'", "''") }}';
+      ALTER USER 'todo_app'@'{{ todo_db_allowed_host }}' IDENTIFIED BY '{{ todo_db_password | replace("'", "''") }}';
+      GRANT SELECT, INSERT, UPDATE, DELETE ON todo.* TO 'todo_app'@'{{ todo_db_allowed_host }}';
+  changed_when: false
+  no_log: true
+
 - name: Install database configuration
   ansible.builtin.template:
     src: "{{ item.src }}"

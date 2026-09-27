@@ -23,3 +23,9 @@ mcp_victoriametrics_version: 1.18.0
 
 binary_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
 mcp_arch: "{{ {'x86_64': 'x86_64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
+
+# Todo database connection; store todo_db_password in Ansible Vault.
+todo_db_host: "{{ hostvars[groups['db'][0]].ansible_host | default(groups['db'][0]) }}"
+todo_db_port: 3306
+# Restrict this to the app VM's source IP when possible.
+todo_db_allowed_host: "%"

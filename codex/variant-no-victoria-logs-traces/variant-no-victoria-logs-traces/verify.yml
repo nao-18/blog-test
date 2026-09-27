@@ -5,7 +5,7 @@
   tasks:
     - name: Check application HTTP response
       ansible.builtin.uri:
-        url: http://127.0.0.1/
+        url: http://127.0.0.1/?health=1
         return_content: true
         status_code: 200
       register: app_health

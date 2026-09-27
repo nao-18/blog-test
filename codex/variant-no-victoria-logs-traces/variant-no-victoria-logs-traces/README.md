@@ -12,6 +12,44 @@
 
 各VMのAlloyは、exporterのメトリクスをVictoriaMetricsへ送信します。OpenTelemetry CollectorはOTLPで受信したmetricsをVictoriaMetricsへ送信します。
 
+## Todoアプリ
+
+Nginx・PHP-FPM・MySQLを使った日本語のTodo画面を同梱しています。
+タスクの追加、一覧表示、詳細とタイトルの編集、完了／未完了の切替、確認付き削除、状態での絞り込みができます。データはMySQLに保存され、Playbookの再実行でも保持されます。
+
+### 導入
+
+1. `inventories/production/group_vars/vault.yml` に `todo_db_password` を追加してください（16文字以上の固有のパスワード）。暗号化済みなら `ansible-vault edit` で編集します。
+2. `group_vars/all.yml` の `todo_db_host` がapp VMから到達できるDBアドレスであることを確認してください。初期値はdbグループ先頭のアドレスです。`todo_db_allowed_host` は接続元app VMのIPに設定できます（初期値 `%`）。DBの3306番ポートへの通信を許可してください。
+3. 初回は `ansible-playbook site.yml --ask-vault-pass` を実行します。既存環境への追加は `ansible-playbook site.yml --limit 'app:db' --ask-vault-pass` でも適用できます。
+4. ブラウザで `http://<app VMのIPまたはhostname>/` を開きます。
+5. `ansible-playbook verify.yml --limit app --ask-vault-pass` でHTTPとDB接続を確認します。
+
+このアプリはログイン機能のない共有タスクリストです。アクセスできる利用者全員が同じタスクを編集できます。既存構成と同様に、信頼できるプライベートネットワークで使用してください。
+
+### ソースと配置先
+
+| ソース | VM上の配置先・用途 |
+|---|---|
+| `roles/app_stack/files/index.php` | `/var/www/middleware/index.php`：PHP画面とCRUD処理 |
+| `roles/app_stack/files/style.css` | `/var/www/middleware/style.css`：レスポンシブ表示 |
+| `roles/app_stack/templates/todo-config.php.j2` | `/etc/middleware/todo.php`：公開ディレクトリ外のDB接続設定 |
+| `roles/db_stack/files/todo.sql` | `todo` DBと`tasks`テーブルの作成 |
+
+PHPにはPDO MySQLとmbstringを使用し、Playbookが必要な拡張を導入します。DBユーザー`todo_app`には`todo` DBに対するSELECT・INSERT・UPDATE・DELETEのみ付与します。画面の更新日時はUTCです。`GET /?health=1` はDBとテーブルへアクセスできる場合に `{"status":"ok"}` を返し、障害時はHTTP 503を返します。
+
+### 動作確認
+
+デプロイ後、次を確認してください。
+
+- タイトルと詳細を入力して追加し、再読み込み後にも残ること。
+- 編集でタイトルと詳細を変更し、完了切替と状態での絞り込みが反映されること。
+- 削除を開き、「削除する」で対象のタスクだけが消えること。
+- 空のタイトルは登録できず、`<script>alert(1)</script>` は文字として表示されること。
+- DBを停止するとHTTP 503となり、接続パスワードが画面に表示されないこと。
+
+PHP構文のみを確認する場合は `php -l roles/app_stack/files/index.php` を実行します。
+
 ## 前提条件
 
 ### Ansibleコントローラー
@@ -189,6 +227,7 @@ cp inventories/production/group_vars/vault.yml.example \
 ---
 mysql_exporter_password: replace-with-a-long-random-value
 grafana_admin_password: replace-with-another-long-random-value
+todo_db_password: replace-with-a-unique-long-random-value
 ```
 
 ファイルを暗号化します。
@@ -257,6 +296,12 @@ monitor_address: 10.0.20.13
 
 ## 構文を確認する
 
+必要なコレクションをコントローラーへインストールします。
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+```
+
 VMへ変更を加える前に構文を確認します。
 
 ```bash
@@ -271,6 +316,25 @@ ansible-playbook site.yml --check --diff --ask-vault-pass
 ```
 
 ## ミドルウェアを構築する
+
+### SELinuxの無効化
+
+`site.yml` は共通セットアップの前に `disable_selinux` roleを実行します。
+Rocky/RHEL系では `python3-libselinux` と `grubby` を導入し、
+`/etc/selinux/config` とカーネル起動引数を更新してSELinuxを無効化します。
+Debian/Ubuntu系ではこのroleの処理をスキップします。
+
+初期設定では自動再起動せず、完全な無効化に再起動が必要な場合はメッセージを表示します。
+適用後にVMを手動で再起動するか、次のように自動再起動を有効にしてください。
+
+```bash
+ansible-playbook site.yml --ask-vault-pass -e disable_selinux_reboot=true
+```
+
+roleを単独で使用する場合は、Playで `gather_facts: true` を指定してください。
+使用するモジュールの仕様は [ansible.posix.selinux公式ドキュメント](https://docs.ansible.com/projects/ansible/latest/collections/ansible/posix/selinux_module.html)を参照してください。
+
+### 全VMへ適用する
 
 全VMへ適用します。
 
@@ -351,30 +415,6 @@ ssh -L 3000:127.0.0.1:3000 ansible@monitor.internal.example.com
 ```bash
 ssh -L 8081:127.0.0.1:8081 ansible@monitor.internal.example.com
 ```
-
-## Grafanaダッシュボード
-
-`monitor_stack` roleは、既存のVictoriaMetricsデータソース（UID: `victoriametrics`）を使う次のダッシュボードを `Middleware` フォルダーへ自動登録します。
-
-| ダッシュボード | 主なメトリクス | URLパス |
-|---|---|---|
-| NGINX Overview | 稼働状態、リクエスト数/秒、接続数・接続状態 | `/d/middleware-nginx` |
-| MySQL Overview | 稼働状態、クエリ数/秒、接続使用率、スロークエリ、InnoDB、通信量 | `/d/middleware-mysql` |
-| Node Exporter Overview | app/db/monitorのCPU、メモリ、ロード、ファイルシステム、ディスクI/O、ネットワーク | `/d/middleware-node-exporter` |
-
-既存環境へ反映するには次を実行します。
-
-```bash
-ansible-playbook site.yml --limit monitor --ask-vault-pass
-```
-
-Grafanaへログインし、`Dashboards` → `Middleware` から開きます。`Instance` でインベントリのホスト名を複数選択でき、初期状態では全ホストを表示します。初期表示は直近6時間、更新間隔は1分です。rate計算には `$__rate_interval` を使い、データソースの収集間隔をAlloyの既定値に合わせて60秒に設定しています。収集開始直後は複数サンプルが揃うまでレートのパネルが空になることがあります。
-
-monitor VMのNode Exporterも `instance` に `inventory_hostname` を設定します。適用前の `127.0.0.1:9100` の系列は履歴として残り、適用後の系列はホスト名で表示されます。
-
-定義は [roles/monitor_stack/files/dashboards](roles/monitor_stack/files/dashboards) のJSONで管理します。JSONを変更してPlaybookを再適用すると、Grafanaが30秒間隔で変更を読み込みます。UIからの上書き保存は無効です。自動登録の仕組みは [Grafana公式のProvisioningドキュメント](https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards) に従っています。
-
-NGINXは `stub_status` で取得できるメトリクスが対象です。HTTPステータスコード別の集計や応答時間は含みません。MySQLは既定の `global_status` / `global_variables` collectorを使用し、DBのバージョンやエンジンによって取得できない項目は空欄になります。`Exporter scrape status` は収集可否、`NGINX status` / `MySQL status` はexporterからサービスへの接続可否を表示します。
 
 ## systemdサービスを確認する
 

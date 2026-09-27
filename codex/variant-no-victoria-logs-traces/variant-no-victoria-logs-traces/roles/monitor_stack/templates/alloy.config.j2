@@ -7,7 +7,7 @@ prometheus.scrape "monitor" {
   targets = [
     { "__address__" = "127.0.0.1:8428", "job" = "victoriametrics" },
     { "__address__" = "127.0.0.1:8081", "job" = "mcp-victoriametrics" },
-    { "__address__" = "127.0.0.1:9100", "job" = "node", "instance" = "{{ inventory_hostname }}" },
+    { "__address__" = "127.0.0.1:9100", "job" = "node" },
     { "__address__" = "127.0.0.1:8888", "job" = "otel-collector" },
     { "__address__" = "127.0.0.1:3000", "job" = "grafana" },
   ]
